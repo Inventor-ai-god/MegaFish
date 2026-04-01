@@ -308,3 +308,202 @@ Added 6 previously undocumented variables:
 - Documentation: 7/10 before → 9/10 after (.env.example now complete)
 - Deductions: dead code (`Process.vue`, deprecated `generate_python_code`), traceback
   leakage in error responses, no production build pipeline
+
+---
+
+## THIRD PASS SUMMARY — Session 3 (2026-03-31)
+
+### PRIORITY 1: TEST COVERAGE EXPANSION — COMPLETE
+
+**New test files created:**
+- `backend/tests/test_simulation_manager.py` — 17 tests
+  - `create_simulation`: state creation, status, disk persistence, platform flags
+  - `get_simulation`: round-trip, missing ID → None, disk reload by fresh instance
+  - `list_simulations`: empty, all, project-filtered, .DS_Store hidden file handling
+  - `to_dict` / `to_simple_dict`: key presence and field omission
+  - **Path traversal guards**: `../../etc/passwd` and absolute paths raise ValueError
+- `backend/tests/test_security_hardening.py` — 8 tests
+  - Traceback stripping middleware in production mode
+  - `traceback` field preserved in debug mode
+  - `error` field preserved after stripping
+  - `CORS_ORIGINS` defaults to `"*"` when env var unset
+  - `CORS_ORIGINS` reads from env var correctly
+  - `_evict_world_sim_results`: removes finished entries over cap
+  - Eviction does NOT touch running entries
+  - No eviction when under cap
+
+**Result: 74/74 tests pass. Total grew from 49 → 74 (+25 tests).**
+
+---
+
+### PRIORITY 2: BACKEND ROBUSTNESS — COMPLETE
+
+**Files modified:**
+
+**`backend/app/api/simulation.py`:**
+- Added `_evict_world_sim_results()` function — evicts oldest completed/failed entries when
+  `_world_sim_results` dict exceeds 100 entries. Called on every new world simulation start.
+  **Fixes unbounded memory accumulation over long server uptime.**
+
+**`backend/app/config.py`:**
+- Added `CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*')` — CORS allowed origins
+  now configurable via env var without code changes. Default `*` preserved for local dev.
+
+**`backend/app/__init__.py`:**
+- Updated CORS initialization to use `Config.CORS_ORIGINS` (supports comma-separated list)
+- Added `after_request` traceback-stripping middleware: in non-debug mode, removes
+  `traceback` field from all JSON error responses. **Fixes internal stack trace leakage.**
+
+**`backend/app/services/simulation_manager.py`:**
+- `_get_simulation_dir()`: added `os.path.realpath` path traversal guard — raises
+  ValueError for any ID that resolves outside SIMULATION_DATA_DIR.
+
+**`backend/app/services/report_agent.py`:**
+- `_get_report_folder()`: added same realpath guard against REPORTS_DIR escape.
+
+---
+
+### PRIORITY 3: FRONTEND UX HARDENING — COMPLETE
+
+**`frontend/src/views/MainView.vue`:**
+- `fetchGraphData` catch block: `console.warn(...)` → `addLog(...)` — error surfaces
+  in the in-UI log panel instead of only browser console
+- `pollTaskStatus` catch block: `console.error(e)` → `addLog(...)` — same fix
+
+**No double-submit risks found** — Home.vue disables button while `loading=true`;
+WorldSimView transitions to `phase='running'` (hides the form); SimulationView
+uses loading state in `Step2EnvSetup` component.
+
+---
+
+### PRIORITY 4: API DOCUMENTATION — COMPLETE
+
+**`backend/app/api/report.py`:**
+- Added docstrings to all 18 route handler functions that previously had none:
+  `generate_report`, `get_generate_status`, `get_report`, `get_report_by_simulation`,
+  `list_reports`, `download_report`, `delete_report`, `chat_with_report_agent`,
+  `get_report_progress`, `get_report_sections`, `get_single_section`,
+  `check_report_status`, `get_agent_log`, `stream_agent_log`, `get_console_log`,
+  `stream_console_log`, `search_graph_tool`, `get_graph_statistics_tool`
+
+All `graph.py` and `simulation.py` route handlers already had docstrings from session 2.
+
+---
+
+### PRIORITY 5: SECURITY AUDIT — COMPLETE
+
+**Issues Found and Fixed:**
+1. **Path traversal** — `report_id` and `simulation_id` used directly in path joins.
+   Fixed with `os.path.realpath` guard in `_get_report_folder` and `_get_simulation_dir`.
+2. **Traceback leakage** — 55 occurrences of `traceback.format_exc()` in JSON error
+   responses. Fixed via after_request middleware that strips the field in non-debug mode.
+3. **CORS wildcard** — `origins: "*"` was hardcoded. Now reads from `CORS_ORIGINS` env var.
+
+**Issues Found, Not Fixed (architectural changes needed):**
+1. **No authentication on any route** — all 30+ API endpoints are unauthenticated. This is
+   by design for a local-first offline tool, but any network exposure is a risk. Marked in
+   ROADMAP v1.0.0 as "Authentication & multi-user support".
+2. **`FLASK_DEBUG=True` by default** — config.py default enables debug mode which activates
+   Werkzeug's interactive debugger (allows arbitrary code execution if `/` endpoints are
+   reached). Only a risk if the port is exposed to untrusted networks.
+3. **`SECRET_KEY` has a predictable default** — `"megafish-secret-key"`. Flask session
+   cookies can be forged if this is not changed in production. Documented in `.env.example`.
+
+**No hardcoded secrets found** — all credentials read from env vars via `Config`.
+**File upload is safe** — UUID filename randomization, extension whitelist, 50 MB cap.
+**No shell injection** — simulation runner builds subprocess commands with fixed script paths,
+  no user input interpolated into shell arguments.
+
+---
+
+### PRIORITY 6: ROADMAP.md — COMPLETE
+
+- Added "Completed during overnight sessions" section with 15 checkboxes
+- Added dead-code cleanup item to v0.3.0
+- Added integration test and production deployment guide items to v1.0.0
+
+---
+
+### COMMITS MADE (SESSION 3)
+
+1. "test: expand test coverage for SimulationManager and security hardening" (+25 tests)
+2. "fix: simulation service robustness and resource cleanup" (eviction, CORS, traceback strip)
+3. "fix: frontend UX hardening — route console errors to addLog"
+4. "docs: add API route docstrings to report blueprint" (18 functions documented)
+5. "security: fix path traversal in report and simulation ID handling"
+6. "docs: update ROADMAP.md to reflect current state"
+
+---
+
+## THREE-PASS RETROSPECTIVE
+
+### Total Issues Found and Fixed (all 3 passes)
+
+| Category | Issues Fixed |
+|----------|-------------|
+| Critical CLI bugs | 1 (wrong API endpoints throughout client.py) |
+| Backend API HTTP codes | 6 (ValueError→503 in 6 routes) |
+| Backend robustness | 3 (eviction, CORS config, traceback leakage) |
+| Security | 2 (path traversal in report+simulation IDs) |
+| Docker/DevOps | 2 (container networking, health checks) |
+| Frontend | 4 (version, GitHub URL, console.warn/error) |
+| CLI lifecycle | 1 (update command git detection) |
+| Docs/comments | 5 (gitignore, requirements, Zep comments, Dockerfile, .env.example) |
+| **Total** | **24 distinct issues fixed** |
+
+### Total Tests Written and Passing
+
+| Session | Tests Added | Running Total |
+|---------|------------|---------------|
+| Session 1 | 0 (test suite didn't exist) | 0 |
+| Session 2 | 49 | 49 |
+| Session 3 | 25 | 74 |
+
+**74/74 tests pass. All external services fully mocked.**
+
+### Total Commits Made (all 3 passes)
+
+- Session 1: 4 commits
+- Session 2: 6 commits
+- Session 3: 6 commits
+- **Total: 16 commits**
+
+### Remaining Known Issues
+
+1. **No authentication** — all API routes are unauthenticated. Acceptable for local-only
+   deployment; a real risk if the port is forwarded or Docker is used on a shared host.
+2. **`FLASK_DEBUG=True` default** — should be `False` in production.
+3. **`SECRET_KEY` predictable default** — must be rotated before any network exposure.
+4. **`Process.vue` dead code** — unreachable view file still present in frontend.
+5. **`generate_python_code()` deprecated function** — dead code in ontology_generator.py.
+6. **`camel-oasis==0.2.5` exact pin** — if yanked from PyPI, install fails.
+7. **No integration tests** — all 74 tests mock external services. Real Neo4j+Ollama
+   integration tests don't exist.
+8. **Ollama model not pre-pulled in Docker** — users must manually pull after first start.
+9. **No production WSGI server config** — currently uses Flask dev server (`run.py`).
+   `gunicorn` or `uwsgi` configuration is needed before any production deployment.
+
+### What a Fourth Pass Should Focus On
+
+1. **Integration test suite** — stand up Neo4j + Ollama in CI, run at least one full
+   pipeline test: upload → ontology → build graph → create simulation → prepare → report.
+2. **Authentication layer** — even a simple API key header check would close the biggest
+   remaining security gap.
+3. **Remove dead code** — delete `Process.vue` and `generate_python_code()`.
+4. **Production hardening** — add `gunicorn` to dependencies, create `Procfile` or
+   `docker-compose.prod.yml`, set `FLASK_DEBUG=False` default in production config.
+5. **Test the CLI end-to-end** — the CLI rewrite from session 1 is untested against
+   a live server; add at least one `megafish run` smoke test.
+
+### Final Health Score: 9/10
+
+**Rationale (up from 8/10 after session 2):**
+- Architecture: 9/10 — unchanged, remains clean
+- Test coverage: 8/10 — 74 tests across API, CLI, ontology, SimulationManager, security;
+  still 0 integration tests (deduction)
+- API correctness: 9/10 — HTTP codes fixed, docstrings added, consistent response format
+- Security: 7/10 → 8/10 — path traversal fixed, traceback stripped, CORS configurable;
+  no auth remains the major open item
+- DevOps: 8/10 — Docker fixed, health checks, .env.example complete
+- Documentation: 9/10 — ROADMAP current, API routes documented, .env.example complete
+- Deduction: dead code (Process.vue, deprecated function), no auth, no prod WSGI config
