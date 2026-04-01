@@ -69,6 +69,12 @@ class Config:
     REPORT_AGENT_MAX_REFLECTION_ROUNDS = int(os.environ.get('REPORT_AGENT_MAX_REFLECTION_ROUNDS', '2'))
     REPORT_AGENT_TEMPERATURE = float(os.environ.get('REPORT_AGENT_TEMPERATURE', '0.5'))
 
+    # CORS configuration
+    # Set to a comma-separated list of allowed origins, e.g. "http://localhost:3000,http://127.0.0.1:3000"
+    # Defaults to "*" (all origins) for local development convenience.
+    # In production, set CORS_ORIGINS to restrict access.
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*')
+
     @classmethod
     def validate(cls):
         """Validate required configuration"""

@@ -26,6 +26,22 @@ logger = get_logger('megafish.api.simulation')
 # ---------------------------------------------------------------------------
 _world_sim_results: dict = {}
 _world_sim_lock = threading.Lock()
+_WORLD_SIM_MAX_ENTRIES = 100  # Evict oldest finished entries when this is exceeded
+
+
+def _evict_world_sim_results():
+    """Remove oldest completed/failed world sim entries to prevent unbounded growth.
+    Must be called while holding _world_sim_lock."""
+    if len(_world_sim_results) < _WORLD_SIM_MAX_ENTRIES:
+        return
+    finished_keys = [
+        k for k, v in _world_sim_results.items()
+        if v.get("status") in ("completed", "failed")
+    ]
+    # Evict half the finished entries (FIFO via insertion order in Python 3.7+)
+    evict_count = max(1, len(finished_keys) // 2)
+    for k in finished_keys[:evict_count]:
+        del _world_sim_results[k]
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +76,7 @@ def start_world_simulation():
 
         # Initialise the result slot so callers can poll immediately
         with _world_sim_lock:
+            _evict_world_sim_results()
             _world_sim_results[sim_id] = {
                 "status": "running",
                 "progress": 0,

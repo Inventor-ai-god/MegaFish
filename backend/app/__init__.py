@@ -39,8 +39,12 @@ def create_app(config_class=Config):
         logger.info("MegaFish Backend starting...")
         logger.info("=" * 50)
 
-    # Enable CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # Enable CORS — origins configurable via CORS_ORIGINS env var
+    # Default is "*" for local dev; set CORS_ORIGINS in production to restrict access.
+    cors_origins = config_class.CORS_ORIGINS
+    if cors_origins != "*" and "," in cors_origins:
+        cors_origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
+    CORS(app, resources={r"/api/*": {"origins": cors_origins}})
 
     # --- Initialize Neo4jStorage singleton (DI via app.extensions) ---
     from .storage import Neo4jStorage
@@ -72,6 +76,18 @@ def create_app(config_class=Config):
     def log_response(response):
         logger = get_logger('megafish.request')
         logger.debug(f"Response: {response.status_code}")
+
+        # Strip 'traceback' field from JSON error responses in non-debug mode.
+        # This prevents internal stack traces from leaking to API consumers.
+        if not debug_mode and response.content_type and 'application/json' in response.content_type:
+            try:
+                data = response.get_json(silent=True)
+                if isinstance(data, dict) and 'traceback' in data:
+                    data.pop('traceback', None)
+                    response.set_data(__import__('json').dumps(data, ensure_ascii=False))
+            except Exception:
+                pass  # Never break responses due to this middleware
+
         return response
 
     # Register blueprints
