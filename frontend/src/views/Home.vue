@@ -4,7 +4,7 @@
     <nav class="navbar" :style="s.navbar">
       <div class="nav-brand" :style="s.navBrand">MEGAFISH</div>
       <div class="nav-links" :style="s.navLinks">
-        <a href="https://github.com/nikmcfly/MegaFish" target="_blank" class="github-link" :style="s.githubLink">
+        <a href="https://github.com/ps3gamingcoolMvp/MegaFish" target="_blank" class="github-link" :style="s.githubLink">
           Visit our Github <span>↗</span>
         </a>
       </div>
@@ -16,7 +16,7 @@
         <div class="hero-left" :style="s.heroLeft">
           <div class="tag-row" :style="s.tagRow">
             <span class="orange-tag" :style="s.orangeTag">Offline Multi-Agent Simulation Engine</span>
-            <span class="version-text" :style="s.versionText">/ v0.1-preview</span>
+            <span class="version-text" :style="s.versionText">/ v0.2.0</span>
           </div>
 
           <h1 class="main-title" :style="s.mainTitle">
