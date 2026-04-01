@@ -413,7 +413,7 @@ const fetchGraphData = async () => {
       }
     }
   } catch (err) {
-    console.warn('Graph fetch error:', err)
+    addLog(`Graph fetch error: ${err.message || err}`)
   }
 }
 
@@ -454,7 +454,7 @@ const pollTaskStatus = async (taskId) => {
       }
     }
   } catch (e) {
-    console.error(e)
+    addLog(`Task poll error: ${e.message || e}`)
   }
 }
 
