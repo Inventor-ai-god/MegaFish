@@ -184,17 +184,64 @@ def run_install():
     console.print("\n  Run: [bold red]megafish[/bold red]\n", style="red")
 
 
-def run_update():
+def _detect_repo_root() -> Path | None:
+    """
+    Find the git repository root that contains this installation.
+
+    Priority:
+    1. Standard install path: ~/.megafish/app
+    2. Development clone: walk up from this file's directory looking for .git
+    """
+    # Try the install.sh bootstrap path first
     install_dir = Path.home() / ".megafish" / "app"
-    if not install_dir.exists():
-        error("MegaFish install directory not found (~/.megafish/app).")
+    if install_dir.exists() and (install_dir / ".git").exists():
+        return install_dir
+
+    # Walk up from backend/cli/installer.py to find a .git directory
+    candidate = _ROOT  # project root (backend/../..)
+    for _ in range(4):  # at most 4 levels up
+        if (candidate / ".git").exists():
+            return candidate
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+
+    return None
+
+
+def run_update():
+    repo_root = _detect_repo_root()
+
+    if repo_root is None:
+        error(
+            "Cannot determine the MegaFish repository location.\n"
+            "  If you installed via install.sh, expected: ~/.megafish/app\n"
+            "  If you cloned the repo, run: git pull && uv pip install -e '.[cli]'"
+        )
         sys.exit(1)
-    status("Checking for updates...")
-    if not _run(f"git -C {install_dir} pull"):
-        error("Update failed — check your internet connection.")
+
+    # Check if this is actually a git repo we can pull
+    if not _run(f"git -C {repo_root} rev-parse --is-inside-work-tree"):
+        error(f"'{repo_root}' is not a git repository. Cannot auto-update.")
         sys.exit(1)
-    status("Reinstalling dependencies...")
-    _run(f"cd {install_dir}/backend && .venv/bin/pip install -e '.[cli]' --quiet")
+
+    status(f"Updating from git at {repo_root}...")
+    if not _run(f"git -C {repo_root} pull"):
+        error("git pull failed — check your internet connection and repository access.")
+        sys.exit(1)
+
+    # Reinstall Python dependencies
+    backend_dir = repo_root / "backend"
+    venv_pip = backend_dir / ".venv" / "bin" / "pip"
+    status("Reinstalling Python dependencies...")
+    if venv_pip.exists():
+        _run(f"{venv_pip} install -e '{backend_dir}[cli]' --quiet")
+    elif shutil.which("uv"):
+        _run(f"cd {backend_dir} && uv sync")
+    else:
+        status("Skipping dependency reinstall — no .venv or uv found. Run manually if needed.")
+
     success("MegaFish updated. Run megafish to start.")
 
 
