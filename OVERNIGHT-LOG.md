@@ -149,3 +149,162 @@ The codebase is well-architected and largely functional. The main bugs found wer
 
 The frontend-to-backend API contract is sound (frontend/src/api/*.js matches Flask routes exactly).
 The backend service layer, storage layer, and Neo4j integration are clean and well-structured.
+
+---
+
+## SECOND PASS SUMMARY — Session 2 (2026-03-31)
+
+### PRIORITY 1: TEST SUITE — COMPLETE
+
+**New files created:**
+- `backend/tests/__init__.py` — package marker
+- `backend/tests/conftest.py` — adds `backend/` to sys.path for import resolution
+- `backend/tests/test_api_health.py` — 16 tests
+  - Flask app creates without Neo4j (Neo4jStorage mocked)
+  - Health endpoint returns 200 with `{"status": "ok"}`
+  - All 8 key routes registered across graph, simulation, report blueprints
+  - Input validation: missing fields return 400; unknown IDs return 404
+- `backend/tests/test_cli.py` — 13 tests
+  - All 6 CLI subcommands registered (help, status, stop, install, update, uninstall)
+  - `get_result_url()` contains sim ID and correct port
+  - `poll_task()` returns on "completed" and "failed"; invokes progress callback
+- `backend/tests/test_ontology.py` — 20 tests
+  - `_build_user_message`: contains requirement, doc text, context; truncates long inputs
+  - `_validate_and_process`: injects missing Person/Organization fallbacks, caps at 10 types,
+    truncates long descriptions, adds missing attributes/examples keys
+  - `generate()`: calls LLM client, returns analysis summary
+
+**Result: 49/49 tests pass. External services fully mocked.**
+
+---
+
+### PRIORITY 2: BACKEND API AUDIT — COMPLETE
+
+**Files modified:**
+- `backend/app/api/simulation.py`
+  - Fixed `get_graph_entities`: `raise ValueError` → direct `return jsonify(...), 503`
+  - Fixed `get_entity_detail`: same pattern
+  - Fixed `get_entities_by_type`: same pattern
+  - Fixed `prepare_simulation`: `raise ValueError` for storage unavailable was caught by
+    `except ValueError → 404` — now returns 503 directly and dead `except ValueError`
+    block removed
+  - Fixed typo: `"task_id Or simulation_id"` → `"task_id or simulation_id"`
+- `backend/app/api/report.py`
+  - Fixed `chat_with_report_agent`: `raise ValueError` → 503
+  - Fixed `search_graph_tool`: `raise ValueError` → 503
+  - Fixed `get_graph_statistics_tool`: `raise ValueError` → 503
+
+**Root cause pattern:** 6 endpoints used `raise ValueError("GraphStorage not initialized")` as a control-flow mechanism. These were caught by broad exception handlers and returned wrong HTTP status codes (500 or 404). All now return 503 immediately.
+
+**No hardcoded credentials found.** `config.py` reads everything from env vars.
+**Response format is consistent:** all endpoints return `{"success": bool, "data": ...}`.
+
+---
+
+### PRIORITY 3: FRONTEND AUDIT — COMPLETE
+
+**Files modified:**
+- `frontend/.env.example` — new file documenting `VITE_API_BASE_URL`
+
+**Findings:**
+- All 7 components and all 6 views use try/catch blocks on async API calls
+- `api/index.js` already reads `VITE_API_BASE_URL` via `import.meta.env` — no hardcoding
+- `vite.config.js` proxy target hardcodes `localhost:5001` — standard Vite dev convention, not a bug
+- `Process.vue` is dead code (router maps `/process/:projectId` → `MainView.vue`, not `Process.vue`);
+  its `TODO` alert stub is unreachable by users
+
+---
+
+### PRIORITY 4: CLI UPDATE COMMAND — COMPLETE
+
+**File modified:** `backend/cli/installer.py`
+
+Added `_detect_repo_root()` helper that detects two contexts:
+1. **install.sh bootstrap**: checks `~/.megafish/app` for a `.git` directory
+2. **git clone / dev install**: walks up from `backend/cli/` looking for `.git`
+
+`run_update()` now:
+- Calls `_detect_repo_root()` to find the repo — exits with a clear message if not found
+- Validates the directory is a git repo before attempting pull
+- After `git pull`, reinstalls deps via `.venv/bin/pip` → `uv sync` → skip (with message)
+- Provides actionable manual instructions when auto-update is impossible
+
+---
+
+### PRIORITY 5: ENVIRONMENT CONFIGURATION — COMPLETE
+
+**File modified:** `.env.example`
+
+Added 6 previously undocumented variables:
+- `FLASK_DEBUG` — Flask debug mode (with production guidance)
+- `SECRET_KEY` — Flask session signing key (note to change in production)
+- `OASIS_DEFAULT_MAX_ROUNDS` — simulation round count
+- `REPORT_AGENT_MAX_TOOL_CALLS` — report agent tool call limit
+- `REPORT_AGENT_MAX_REFLECTION_ROUNDS` — report agent reflection rounds
+- `REPORT_AGENT_TEMPERATURE` — report agent LLM temperature
+
+**New file:** `frontend/.env.example` documenting `VITE_API_BASE_URL`.
+
+---
+
+### PRIORITY 6: DOCKER — COMPLETE
+
+**Files modified:** `docker-compose.yml`, `Dockerfile`
+
+`docker-compose.yml`:
+- **Critical fix:** Added `environment:` section to the `megafish` service that overrides
+  `NEO4J_URI`, `LLM_BASE_URL`, `EMBEDDING_BASE_URL`, `OPENAI_API_BASE_URL` to use Docker
+  service names (`neo4j`, `ollama`) instead of `localhost`. Without this, the backend
+  container could not reach Neo4j or Ollama — the service would start and then fail on
+  every graph operation.
+- Added `healthcheck` on the `megafish` service (`curl /health`)
+
+`Dockerfile`:
+- Translated all Chinese comments to English
+- Added note about production vs dev-server CMD
+
+---
+
+### REMAINING ISSUES — NEEDS HUMAN ATTENTION
+
+1. **`Process.vue` is dead code** — `/frontend/src/views/Process.vue` is never routed to
+   (router uses `MainView.vue`). Contains an old `TODO` alert stub. Safe to delete or archive.
+
+2. **`generate_python_code()` in `ontology_generator.py`** — marked `[DEPRECATED]`, references
+   `zep_cloud` which is no longer a dependency. Dead code but harmless.
+
+3. **Traceback included in 500 responses** — production deployments should set
+   `FLASK_DEBUG=False` and strip traceback from API responses to avoid leaking internals.
+   Currently `traceback.format_exc()` is included in many error responses.
+
+4. **Ollama model not pre-pulled in Docker** — the `ollama` container starts empty; users
+   must manually run `docker exec megafish-ollama ollama pull qwen2.5:32b`. This is by
+   design (huge image) but could use a startup script or a documented one-liner.
+
+5. **`camel-oasis==0.2.5` and `camel-ai==0.2.78`** — exact pinned versions from PyPI.
+   If either is yanked, install will fail. Consider adding fallback or pinning with hash.
+
+---
+
+### COMMITS MADE (SESSION 2)
+
+1. "test: add initial test suite for API, CLI, and core services" (49 tests, all pass)
+2. "fix: backend API error handling and input validation" (6 ValueError→503 fixes)
+3. "fix: frontend error handling and API config" (frontend .env.example)
+4. "fix: megafish update command handles both git and installed contexts"
+5. "docs: complete .env.example for backend and frontend"
+6. "fix: docker-compose configuration and dependencies"
+
+---
+
+### OVERALL PROJECT HEALTH SCORE: 8/10
+
+**Rationale:**
+- Architecture: 9/10 — Clean Flask factory, proper blueprint separation, background tasks
+  with disk-persisted TaskManager, layered service/storage/API design
+- Test coverage: 5/10 before this session → 7/10 after (49 tests; service layer still unmocked)
+- API correctness: 7/10 before → 9/10 after (wrong HTTP codes fixed, consistent response format)
+- DevOps: 6/10 before → 8/10 after (Docker networking fixed, health checks added)
+- Documentation: 7/10 before → 9/10 after (.env.example now complete)
+- Deductions: dead code (`Process.vue`, deprecated `generate_python_code`), traceback
+  leakage in error responses, no production build pipeline
