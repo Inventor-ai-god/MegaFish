@@ -24,6 +24,18 @@ logger = get_logger('megafish.api.report')
 
 @report_bp.route('/generate', methods=['POST'])
 def generate_report():
+    """
+    Start async report generation for a completed simulation.
+
+    Body JSON:
+        simulation_id    (str, required) — ID of the simulation to report on
+        force_regenerate (bool, optional) — overwrite an existing completed report (default: false)
+
+    Returns 200 with task_id and report_id to poll progress.
+    Returns 400 if simulation_id is missing.
+    Returns 404 if simulation or project not found.
+    Returns 503 if Neo4j storage is unavailable.
+    """
     try:
         data = request.get_json() or {}
         simulation_id = data.get('simulation_id')
@@ -115,6 +127,17 @@ def generate_report():
 
 @report_bp.route('/generate/status', methods=['POST'])
 def get_generate_status():
+    """
+    Poll the status of a report generation task.
+
+    Body JSON:
+        task_id       (str, optional) — task ID returned by /generate
+        simulation_id (str, optional) — simulation ID; returns immediately if report is complete
+
+    At least one of task_id or simulation_id must be provided.
+    Returns 400 if neither is given.
+    Returns 404 if the task does not exist.
+    """
     try:
         data = request.get_json() or {}
         task_id = data.get('task_id')
@@ -151,6 +174,13 @@ def get_generate_status():
 
 @report_bp.route('/<report_id>', methods=['GET'])
 def get_report(report_id: str):
+    """
+    Retrieve a report by its ID.
+
+    Path: report_id — the report ID returned by /generate
+    Returns 200 with full report data on success.
+    Returns 404 if the report does not exist.
+    """
     try:
         report = ReportManager.get_report(report_id)
         if not report:
@@ -163,6 +193,13 @@ def get_report(report_id: str):
 
 @report_bp.route('/by-simulation/<simulation_id>', methods=['GET'])
 def get_report_by_simulation(simulation_id: str):
+    """
+    Retrieve the report associated with a simulation.
+
+    Path: simulation_id — the simulation ID
+    Returns 200 with report data on success.
+    Returns 404 if no report exists for the given simulation.
+    """
     try:
         report = ReportManager.get_report_by_simulation(simulation_id)
         if not report:
@@ -175,6 +212,15 @@ def get_report_by_simulation(simulation_id: str):
 
 @report_bp.route('/list', methods=['GET'])
 def list_reports():
+    """
+    List all reports, optionally filtered by simulation.
+
+    Query params:
+        simulation_id (str, optional) — filter to reports for this simulation
+        limit         (int, optional) — max results to return (default 50)
+
+    Returns 200 with an array of report summaries.
+    """
     try:
         simulation_id = request.args.get('simulation_id')
         limit = request.args.get('limit', 50, type=int)
@@ -187,6 +233,13 @@ def list_reports():
 
 @report_bp.route('/<report_id>/download', methods=['GET'])
 def download_report(report_id: str):
+    """
+    Download a report as a Markdown file.
+
+    Path: report_id — the report ID
+    Returns the .md file as an attachment.
+    Returns 404 if the report does not exist.
+    """
     try:
         report = ReportManager.get_report(report_id)
         if not report:
@@ -215,6 +268,13 @@ def download_report(report_id: str):
 
 @report_bp.route('/<report_id>', methods=['DELETE'])
 def delete_report(report_id: str):
+    """
+    Delete a report and its associated files.
+
+    Path: report_id — the report ID
+    Returns 200 on successful deletion.
+    Returns 404 if the report does not exist.
+    """
     try:
         success = ReportManager.delete_report(report_id)
         if not success:
@@ -229,6 +289,19 @@ def delete_report(report_id: str):
 
 @report_bp.route('/chat', methods=['POST'])
 def chat_with_report_agent():
+    """
+    Send a message to the report agent for a given simulation.
+
+    Body JSON:
+        simulation_id (str, required) — the simulation to chat about
+        message       (str, required) — user message
+        chat_history  (list, optional) — prior conversation turns
+
+    Returns 200 with the agent's text response.
+    Returns 400 if simulation_id or message is missing.
+    Returns 404 if simulation or project not found.
+    Returns 503 if Neo4j storage is unavailable.
+    """
     try:
         data = request.get_json() or {}
         simulation_id = data.get('simulation_id')
@@ -279,6 +352,13 @@ def chat_with_report_agent():
 
 @report_bp.route('/<report_id>/progress', methods=['GET'])
 def get_report_progress(report_id: str):
+    """
+    Get the section-by-section generation progress of a report.
+
+    Path: report_id — the report ID
+    Returns 200 with progress details (current section, total sections, percent).
+    Returns 404 if the report or its progress info is not found.
+    """
     try:
         progress = ReportManager.get_progress(report_id)
         if not progress:
@@ -291,6 +371,12 @@ def get_report_progress(report_id: str):
 
 @report_bp.route('/<report_id>/sections', methods=['GET'])
 def get_report_sections(report_id: str):
+    """
+    List all generated sections for a report.
+
+    Path: report_id — the report ID
+    Returns 200 with sections array, total count, and whether generation is complete.
+    """
     try:
         sections = ReportManager.get_generated_sections(report_id)
         report = ReportManager.get_report(report_id)
@@ -308,6 +394,13 @@ def get_report_sections(report_id: str):
 
 @report_bp.route('/<report_id>/section/<int:section_index>', methods=['GET'])
 def get_single_section(report_id: str, section_index: int):
+    """
+    Retrieve the Markdown content of a single report section.
+
+    Path: report_id — the report ID; section_index — zero-based section number
+    Returns 200 with section filename and content.
+    Returns 404 if that section has not been generated yet.
+    """
     try:
         section_path = ReportManager._get_section_path(report_id, section_index)
         if not os.path.exists(section_path):
@@ -324,6 +417,12 @@ def get_single_section(report_id: str, section_index: int):
 
 @report_bp.route('/check/<simulation_id>', methods=['GET'])
 def check_report_status(simulation_id: str):
+    """
+    Check whether a report exists for a simulation and whether interview mode is unlocked.
+
+    Path: simulation_id — the simulation ID
+    Returns 200 with has_report (bool), report_id, report_status, and interview_unlocked (bool).
+    """
     try:
         report = ReportManager.get_report_by_simulation(simulation_id)
         has_report = report is not None
@@ -346,6 +445,13 @@ def check_report_status(simulation_id: str):
 
 @report_bp.route('/<report_id>/agent-log', methods=['GET'])
 def get_agent_log(report_id: str):
+    """
+    Retrieve JSONL agent log entries for a report (paginated).
+
+    Path: report_id — the report ID
+    Query params: from_line (int, optional) — start reading from this line number (default 0)
+    Returns 200 with log entries array and total line count.
+    """
     try:
         from_line = request.args.get('from_line', 0, type=int)
         log_data = ReportManager.get_agent_log(report_id, from_line=from_line)
@@ -357,6 +463,12 @@ def get_agent_log(report_id: str):
 
 @report_bp.route('/<report_id>/agent-log/stream', methods=['GET'])
 def stream_agent_log(report_id: str):
+    """
+    Retrieve all agent log entries for a report in one response.
+
+    Path: report_id — the report ID
+    Returns 200 with all log entries and total count.
+    """
     try:
         logs = ReportManager.get_agent_log_stream(report_id)
         return jsonify({"success": True, "data": {"logs": logs, "count": len(logs)}})
@@ -369,6 +481,13 @@ def stream_agent_log(report_id: str):
 
 @report_bp.route('/<report_id>/console-log', methods=['GET'])
 def get_console_log(report_id: str):
+    """
+    Retrieve console (stdout) log lines for a report (paginated).
+
+    Path: report_id — the report ID
+    Query params: from_line (int, optional) — start reading from this line number (default 0)
+    Returns 200 with log lines array and total line count.
+    """
     try:
         from_line = request.args.get('from_line', 0, type=int)
         log_data = ReportManager.get_console_log(report_id, from_line=from_line)
@@ -380,6 +499,12 @@ def get_console_log(report_id: str):
 
 @report_bp.route('/<report_id>/console-log/stream', methods=['GET'])
 def stream_console_log(report_id: str):
+    """
+    Retrieve all console log lines for a report in one response.
+
+    Path: report_id — the report ID
+    Returns 200 with all log lines and total count.
+    """
     try:
         logs = ReportManager.get_console_log_stream(report_id)
         return jsonify({"success": True, "data": {"logs": logs, "count": len(logs)}})
@@ -392,6 +517,18 @@ def stream_console_log(report_id: str):
 
 @report_bp.route('/tools/search', methods=['POST'])
 def search_graph_tool():
+    """
+    Debug endpoint: run a free-text search against the knowledge graph.
+
+    Body JSON:
+        graph_id (str, required) — graph to search
+        query    (str, required) — search query
+        limit    (int, optional) — max results (default 10)
+
+    Returns 200 with matching nodes and edges.
+    Returns 400 if graph_id or query is missing.
+    Returns 503 if Neo4j storage is unavailable.
+    """
     try:
         data = request.get_json() or {}
         graph_id = data.get('graph_id')
@@ -412,6 +549,16 @@ def search_graph_tool():
 
 @report_bp.route('/tools/statistics', methods=['POST'])
 def get_graph_statistics_tool():
+    """
+    Debug endpoint: get node/edge counts and label distribution for a graph.
+
+    Body JSON:
+        graph_id (str, required) — graph to inspect
+
+    Returns 200 with statistics dict.
+    Returns 400 if graph_id is missing.
+    Returns 503 if Neo4j storage is unavailable.
+    """
     try:
         data = request.get_json() or {}
         graph_id = data.get('graph_id')
