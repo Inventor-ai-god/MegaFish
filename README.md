@@ -96,8 +96,24 @@ curl -fsSL https://megafish.sh/install.sh | bash
 ## Screenshot
 
 <div align="center">
-<img src="./static/image/megafish-screenshot.jpg" alt="MegaFish — English UI" width="100%"/>
+<img src="./static/image/megafish-cli-screenshot.png" alt="MegaFish CLI" width="100%"/>
 </div>
+
+## MegaFish vs MiroFish — what's different
+
+MiroFish-Offline was a good first step at making MegaFish run locally. MegaFish builds on it and fixes the things that were actually broken:
+
+| | MiroFish-Offline | **MegaFish** |
+|---|---|---|
+| **Install** | Manual — clone repo, install deps, start services by hand | `curl \| bash` — one command, done |
+| **CLI** | `megafish status` / `megafish stop` accidentally triggered a simulation instead of running the command | Fixed — all subcommands route correctly |
+| **Backend startup** | Silent failure after 30 s timeout; CLI crashed with a raw `ReadTimeout` | Shows last 10 lines of startup log + exits cleanly with a clear error |
+| **Port conflicts** | A stale backend process on port 5001 would silently block every future run | Auto-detects and kills the stale process before starting |
+| **Ontology generation** | LLM cut off mid-JSON because context window (2,048 tokens) was too small | Context window raised to 8,192 / output limit to 4,096 — no more truncated JSON |
+| **Agent persona generation** | Step was wired up in the backend but **never called by the CLI** — simulations ran with zero personas | Fixed — CLI now correctly calls prepare_simulation before starting |
+| **UI** | Startup screen panels stretched full-width with no structure | Fish art centered as a rigid block; clean info panel; scenario box with no redundant bottom border |
+
+The short version: MiroFish-Offline could install and display the UI. MegaFish can actually **run a simulation end-to-end**.
 
 ## Manual Install
 
