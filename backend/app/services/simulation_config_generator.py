@@ -236,7 +236,8 @@ class SimulationConfigGenerator:
 
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url=self.base_url
+            base_url=self.base_url,
+            timeout=300.0  # 5 minute timeout per LLM call
         )
     
     def generate_config(
@@ -446,8 +447,8 @@ class SimulationConfigGenerator:
                         {"role": "user", "content": prompt}
                     ],
                     response_format={"type": "json_object"},
-                    temperature=0.7 - (attempt * 0.1)  # Lower temperature with each retry
-                    # Don't set max_tokens, let LLM generate freely
+                    temperature=0.7 - (attempt * 0.1),  # Lower temperature with each retry
+                    max_tokens=2048
                 )
 
                 content = response.choices[0].message.content
