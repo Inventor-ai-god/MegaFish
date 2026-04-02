@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$REPO        = "https://github.com/ps3gamingcoolMvp/MegaFish.git"
+$REPO        = "https://github.com/Inventor-ai-god/MegaFish.git"
 $INSTALL_DIR = "$env:USERPROFILE\.megafish\app"
 $MARKER_DIR  = "$env:USERPROFILE\.megafish"
 
@@ -59,6 +59,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 ok "git"
 
+# Python 3.11+
 $pyOk = $false
 foreach ($cmd in @("python3", "python")) {
     if (Get-Command $cmd -ErrorAction SilentlyContinue) {
@@ -67,22 +68,37 @@ foreach ($cmd in @("python3", "python")) {
     }
 }
 if (-not $pyOk) {
-    fail "Python 3.11+ is required. Install from: https://www.python.org/downloads/"
+    run "Installing Python 3.11"
+    winget install Python.Python.3.11 --silent --accept-source-agreements --accept-package-agreements 2>$null
+    $env:PATH = "$env:LOCALAPPDATA\Programs\Python\Python311;$env:PATH"
+    $PYTHON = "python"
 }
 ok "Python 3.11+"
 
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    fail "Node.js 18+ is required. Install from: https://nodejs.org"
+# uv
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    run "Installing uv"
+    irm https://astral.sh/uv/install.ps1 | iex
+    $env:PATH = "$env:USERPROFILE\.local\bin;$env:USERPROFILE\.cargo\bin;$env:PATH"
 }
-ok "Node.js"
+ok "uv"
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    fail "Docker is required. Install Docker Desktop: https://docker.com/products/docker-desktop"
+# Node.js 18+
+$nodeOk = $false
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    $nodeVer = node -e "process.stdout.write(process.versions.node.split('.')[0])" 2>$null
+    if ([int]$nodeVer -ge 18) { $nodeOk = $true }
 }
-ok "Docker"
+if (-not $nodeOk) {
+    run "Installing Node.js"
+    winget install OpenJS.NodeJS.LTS --silent --accept-source-agreements --accept-package-agreements 2>$null
+}
+ok "Node.js 18+"
 
+# Ollama
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
-    fail "Ollama is required. Install from: https://ollama.com/download/windows"
+    run "Installing Ollama"
+    winget install Ollama.Ollama --silent --accept-source-agreements --accept-package-agreements 2>$null
 }
 ok "Ollama"
 
@@ -104,8 +120,8 @@ if (Test-Path "$INSTALL_DIR\.git") {
 
 run "Installing Python packages"
 Set-Location "$INSTALL_DIR\backend"
-& $PYTHON -m venv .venv
-& ".venv\Scripts\pip" install -r requirements.txt --quiet
+uv venv --python 3.11 .venv --quiet 2>$null
+uv pip install -r requirements.txt --quiet
 ok "Python packages"
 
 # ── Node packages ────────────────────────────────────────────────
@@ -120,14 +136,12 @@ ok "Node packages"
 
 # ── Neo4j ────────────────────────────────────────────────────────
 
-run "Starting Neo4j"
-$neo4jRunning = docker ps 2>$null | Select-String "megafish-neo4j"
-if (-not $neo4jRunning) {
-    docker run -d --name megafish-neo4j `
-        -p 7474:7474 -p 7687:7687 `
-        -e NEO4J_AUTH=neo4j/megafish `
-        neo4j:5.18-community 2>$null | Out-Null
+run "Installing Neo4j"
+if (-not (Get-Command neo4j -ErrorAction SilentlyContinue)) {
+    winget install Neo4j.Neo4j-Community --silent --accept-source-agreements --accept-package-agreements 2>$null
 }
+neo4j-admin dbms set-initial-password megafish 2>$null
+Start-Service neo4j 2>$null
 ok "Neo4j"
 
 # ── .env ─────────────────────────────────────────────────────────
